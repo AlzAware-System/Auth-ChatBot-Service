@@ -322,6 +322,18 @@ def my_prescriptions():
     prescs = [{'medicine_name': p.medicine_name, 'schedule_time': p.schedule_time.strftime('%H:%M:%S'), 'notes': p.notes} for p in patient.prescriptions]
     return success_response(data={'prescriptions': prescs})
 
+@handle_errors('Fetch patient prescriptions failed')
+def get_patient_prescriptions(patient_id: str):
+    token = _get_token_from_header()
+    if not token: raise AuthError('Missing Bearer token')
+    try: tp = decode_token(token)
+    except JWTError as e: raise AuthError(str(e)) from e
+    if tp.get('role') != 'doctor': raise AuthError('Only doctors can view patient prescriptions')
+    doctor_id = tp.get('sub')
+    patient = _doctor_patient_guard(doctor_id, patient_id)
+    prescs = [{'medicine_name': p.medicine_name, 'medicine_id': p.medicine_id, 'schedule_time': p.schedule_time.strftime('%H:%M:%S'), 'alzhiemer_level': p.alzhiemer_level, 'notes': p.notes} for p in patient.prescriptions]
+    return success_response(data={'patient_id': patient.patient_id, 'patient_name': patient.name, 'prescriptions': prescs})
+
 @handle_errors('Fetch doctor patients failed')
 def my_patients():
     token = _get_token_from_header()

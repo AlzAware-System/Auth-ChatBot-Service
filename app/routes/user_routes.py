@@ -6,6 +6,7 @@ from app.controllers.user_controller import (
     add_todo,
     deleteme,
     get_patient_game_scores,
+    get_patient_prescriptions,
     get_patient_todos,
     me,
     my_patients,
@@ -42,6 +43,11 @@ def add_prescription_route():
 @user_bp.route('/my-prescriptions', methods=['GET'])
 def my_prescriptions_route():
     return my_prescriptions()
+
+
+@user_bp.route('/prescriptions/<string:patient_id>', methods=['GET'])
+def get_patient_prescriptions_route(patient_id):
+    return get_patient_prescriptions(patient_id)
 
 
 @user_bp.route('/my-patients', methods=['GET'])
