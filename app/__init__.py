@@ -194,17 +194,21 @@ def create_app():
     # Register blueprints
     from .routes.auth_routes import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
-    
+
     from .routes.user_routes import user_bp
     app.register_blueprint(user_bp, url_prefix='/user')
 
     from .routes.admin_routes import admin_bp
     app.register_blueprint(admin_bp, url_prefix='/admin')
-    
+
     from app.routes.chat_routes import chat_bp
-    app.register_blueprint(chat_bp, url_prefix='/chat')    
+    app.register_blueprint(chat_bp, url_prefix='/chat')
 
     from app.routes.gps_routes import gps_bp
     app.register_blueprint(gps_bp, url_prefix='/api')
+
+
+    from .routes.scan_routes import scan_bp
+    app.register_blueprint(scan_bp, url_prefix='/scan')
 
     return app
