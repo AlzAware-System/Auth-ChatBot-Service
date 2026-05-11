@@ -16,6 +16,8 @@ from .patient import Patient
 from .prescription import MPrescription
 from .location import Location
 from .todo import ToDo
+from .matching_item import MatchingItem
+from .matching_game_result import MatchingGameResult
 
 __all__ = [
     'db',
@@ -30,4 +32,7 @@ __all__ = [
     'MPrescription',
     'Location',
     'ToDo',
+    'MatchingItem',
+    'MatchingGameResult',
 ]
+

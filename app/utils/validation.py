@@ -143,3 +143,16 @@ class UpdateTodoPayload(BaseModel):
     description: str | None = None
     due_date: str | None = None
     is_done: bool | None = None
+
+
+class SubmitMatchingAnswerItem(BaseModel):
+    """A single image-name pairing submitted by the player."""
+    model_config = ConfigDict(extra='forbid')
+    imageId: str
+    nameId: str
+
+
+class SubmitMatchingAnswersPayload(BaseModel):
+    """Wrapper for the full list of answers."""
+    model_config = ConfigDict(extra='forbid')
+    answers: list[SubmitMatchingAnswerItem]

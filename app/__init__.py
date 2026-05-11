@@ -211,4 +211,7 @@ def create_app():
     from .routes.scan_routes import scan_bp
     app.register_blueprint(scan_bp, url_prefix='/scan')
 
+    from .routes.matching_game_routes import matching_game_bp
+    app.register_blueprint(matching_game_bp, url_prefix='/game')
+
     return app
