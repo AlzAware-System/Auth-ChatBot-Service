@@ -148,6 +148,33 @@ venv.bak/
 .spyderproject
 .spyproject
 
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database/Vector DB
+*.db
+chroma.sqlite3
+vector_db/
+
+# Logs
+*.log
+logs/
+
+# Local uploads
+uploads/
+static/uploads/
+
 # Rope project settings
 .ropeproject
 
