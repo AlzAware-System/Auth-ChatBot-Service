@@ -101,7 +101,9 @@ def _get_token_from_header():
         return auth_header.split(' ')[1]
     return None
 
-def jwt_required():
+def jwt_required(roles: list[str] | None = None):
+    normalized_roles = {role.strip().lower() for role in roles or [] if role and role.strip()}
+
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -135,6 +137,14 @@ def jwt_required():
                 if token_password_sig and current_password_sig:
                     if not hmac.compare_digest(token_password_sig, current_password_sig):
                         raise JWTError('Password changed after token was issued')
+
+                current_role = str(payload.get('role') or '').strip().lower()
+                if normalized_roles and current_role not in normalized_roles:
+                    return error_response(
+                        message='You do not have permission to access this resource',
+                        status_code=403,
+                        code='FORBIDDEN',
+                    )
 
                 # Store data on the request object for later use
                 request.current_user_payload = payload
