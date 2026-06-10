@@ -466,40 +466,130 @@ RATELIMIT_STORAGE_URI=memory://
 
 ## 🔒 Security
 
-| Feature | Implementation |
-|:---|:---|
-| **Password Hashing** | `passlib` with bcrypt — never stores plain text |
-| **JWT Signing** | HS256 algorithm with configurable secret |
-| **Security Headers** | Flask-Talisman (CSP, HSTS, secure cookies) |
-| **Input Validation** | Pydantic strict schema validation (422 on errors) |
-| **Rate Limiting** | Flask-Limiter per-IP rate limiting |
-| **SQL Injection** | Flask-SQLAlchemy ORM with parameterized queries |
+### Baseline Security Stack
 
-### 🛡️ Hardened Security Patches
+| Layer | Implementation | Description |
+|:---|:---|:---|
+| **Password Hashing** | `bcrypt` (cost factor 12) | All passwords are hashed before storage — plain text is never persisted |
+| **JWT Signing** | `HS256` + `pwd_sig` claim | Tokens are cryptographically signed and bound to the user's password hash |
+| **Security Headers** | Flask-Talisman | Enforces CSP, HSTS, X-Content-Type-Options, X-Frame-Options |
+| **Input Validation** | Pydantic v2 strict schemas | All request payloads are validated; invalid data returns `422 Unprocessable Entity` |
+| **Rate Limiting** | Flask-Limiter (per-IP) | All endpoints are rate-limited to prevent abuse (default: 100 req/min) |
+| **SQL Injection** | SQLAlchemy ORM | Parameterized queries via ORM — no raw SQL concatenation |
+| **Token Revocation** | In-memory blacklist | Logout immediately invalidates the token for the remainder of its TTL |
+| **Cross-Service Auth** | Shared `JWT_SECRET` | Tokens issued here are verifiable by `Face-Recognition-Service` |
 
-Recently, the following critical vulnerabilities were successfully closed across the `Auth-ChatBot-Service` and `Face-Recognition-Service`:
+---
 
-1. **Registration Enumeration Prevention:** Registration endpoints return identical `HTTP 200 OK` generic responses and normalize processing time (`_dummy_verify`) regardless of whether an email exists or not, preventing attackers from harvesting registered emails.
+### 🛡️ Security Audit & Vulnerability Remediation
 
-2. **Werkzeug Debugger & Information Disclosure:** Enforced `FLASK_ENV=production` and dynamic `debug=False` loading to prevent the Flask/Werkzeug interactive debugger from leaking stack traces and sensitive source code to the client on `500 Internal Server Error`.
+A comprehensive security audit was conducted on the entire backend platform. The following **7 critical vulnerabilities** were identified and remediated across `Auth-ChatBot-Service` and `Face-Recognition-Service`:
 
-3. **Weak JWT Secret & Safe Rotation:** Replaced the weak hardcoded JWT secret with a cryptographically secure 64-character hex string. Implemented a seamless fallback mechanism (`JWT_SECRET_OLD`) in both the Auth service and Face Recognition services to securely rotate keys without invalidating existing mobile application sessions.
+#### Vulnerability Summary
 
-4. **Token Invalidation Failure Fix:** Fixed a Python timezone bug (`datetime.utcnow()`) in `jwt.py` that caused password-change timestamps to evaluate incorrectly against token issuance times. Changing a password now mathematically invalidates all previously issued JWT tokens instantly.
+| # | Vulnerability | Severity | OWASP Category | Status |
+|:--|:---|:---|:---|:---|
+| 1 | Registration Enumeration | 🔴 High | A01 — Broken Access Control | ✅ Fixed |
+| 2 | Werkzeug Debugger / Info Disclosure | 🔴 High | A05 — Security Misconfiguration | ✅ Fixed |
+| 3 | Weak JWT Secret Key (Token Forgery) | 🔴 Critical | A02 — Cryptographic Failures | ✅ Fixed |
+| 4 | Token Invalidation Failure After Password Change | 🔴 High | A07 — Identification & Auth Failures | ✅ Fixed |
+| 5 | AI Chatbot Prompt Injection | 🟠 Medium | A03 — Injection | ✅ Fixed |
+| 6 | Token Fixation | 🟠 Medium | A07 — Identification & Auth Failures | ✅ Fixed |
+| 7 | Account Lockout via Email Hijacking | 🔴 High | A01 — Broken Access Control | ✅ Fixed |
 
-5. **AI Chatbot Prompt Injection Defense:** Refactored the Gemini API integration in `chat_controller.py` to use a strict `messages` array payload. This perfectly separates system instructions from user inputs, preventing attackers from bypassing restrictions using malicious inputs.
+---
 
-6. **Token Fixation Protection:** Authentication workflows were hardened to ensure that a fresh JWT is always issued after successful authentication and privilege-changing operations. Existing or attacker-controlled tokens can no longer be reused across authentication boundaries, preventing session fixation attacks and ensuring that authenticated sessions are always bound to a newly generated secure token.
+#### 1. Registration Enumeration Prevention
 
-7. **Account Lockout via Email Hijacking Prevention:** The email update workflow was redesigned to require ownership verification before applying email address changes. Sensitive account actions are no longer performed immediately when a new email is submitted. Instead, verification is required before the account identity is modified, preventing attackers from hijacking accounts by replacing a victim's email address and locking the legitimate user out of password recovery and account access mechanisms.
+**Root Cause:** Registration endpoints returned `HTTP 409 Conflict` with `"Email already registered"` for existing emails and `HTTP 201 Created` for new accounts. Additionally, a timing side-channel existed — existing-email requests returned immediately while new registrations performed expensive `bcrypt` hashing, allowing attackers to infer account existence from response time alone.
 
+**Fix:** All registration endpoints now return an identical `HTTP 200 OK` response with a generic message for both existing and non-existing emails. A `_dummy_verify()` function performs a throwaway bcrypt hash to normalize processing time. The validation order was corrected to check foreign keys (e.g., `doctor_id`) before email uniqueness, preventing targeted enumeration.
+
+**Affected Files:**
+- `app/controllers/auth_controller.py` — `_register_patient()`, `_register_doctor()`, `_register_caregiver()`
+
+---
+
+#### 2. Werkzeug Debugger & Information Disclosure
+
+**Root Cause:** `run.py` had `debug=True` hardcoded, and `.env` set `FLASK_ENV=development`. In production, this exposed the Werkzeug interactive debugger on any unhandled exception, leaking full stack traces, source code, environment variables, and allowing arbitrary code execution via the debugger PIN.
+
+**Fix:** `run.py` now dynamically reads `FLASK_ENV` and only enables debug mode in development. The `.env` file was updated to `FLASK_ENV=production`.
+
+**Affected Files:**
+- `run.py` — Debug mode logic
+- `.env` — Environment configuration
+
+---
+
+#### 3. Weak JWT Secret Key & Safe Rotation
+
+**Root Cause:** The JWT signing secret was a weak, guessable string (`JwtSecretForAuth` — only 17 characters). An attacker could brute-force or dictionary-attack this secret and forge valid JWT tokens for any user, achieving full account takeover across all roles.
+
+**Fix:** Replaced the secret with a cryptographically secure 64-character hex string. Implemented a graceful key rotation mechanism using `JWT_SECRET_OLD` — new tokens are signed with the strong key, while existing tokens signed with the old key remain valid during the transition period. This was applied across **all three services** (Auth-ChatBot, Face-Recognition-Server, Retrain-Server) to maintain cross-service JWT verification.
+
+**Affected Files:**
+- `.env` — `JWT_SECRET`, `JWT_SECRET_OLD`, `SECRET_KEY`
+- `app/utils/jwt.py` — `_get_secret()`, `decode_token()`
+- `Face-Recognition-Service/.env`
+- `Face-Recognition-Service/Face-Recognition-Server/.env`
+- `Face-Recognition-Service/Retrain-Server/.env`
+- `Face-Recognition-Service/*/middleware/auth.py`
+
+---
+
+#### 4. Token Invalidation Failure After Password Change
+
+**Root Cause:** A Python timezone bug. `datetime.utcnow()` returns a **naive** (timezone-unaware) datetime. When `_to_unix_timestamp()` called `.timestamp()` on it, Python assumed the value was in the server's **local timezone** (e.g., UTC+3), producing a timestamp shifted by 3 hours into the past. This caused the security check `changed_ts > token_iat` to silently pass even after a password change, allowing old tokens to remain valid indefinitely.
+
+**Fix:** Modified `_to_unix_timestamp()` to explicitly attach `tzinfo=UTC` to naive datetimes before calling `.timestamp()`, ensuring mathematically correct comparison. Combined with the existing `pwd_sig` (password signature) claim, tokens are now **instantly invalidated** across all devices the moment a password is changed.
+
+**Affected Files:**
+- `app/utils/jwt.py` — `_to_unix_timestamp()`
+
+---
+
+#### 5. AI Chatbot Prompt Injection Defense
+
+**Root Cause:** User input was directly interpolated into the LLM system prompt via f-string (`User Question: "{question}"`). An attacker could inject control sequences like `"Ignore all previous instructions..."` to override system directives, extract the system prompt, or manipulate the AI into disclosing patient medical records.
+
+**Fix:** Migrated from single-string prompt concatenation to a structured multi-turn `messages` array. System instructions are sent as a separate context turn, followed by a model acknowledgment turn, and then the user's actual input as a distinct message. This creates a clear boundary that the LLM respects, preventing role-override and instruction-leakage attacks.
+
+**Affected Files:**
+- `app/controllers/chat_controller.py` — `ask_text()`, `ask_voice()`
+
+---
+
+#### 6. Token Fixation Protection
+
+**Root Cause:** Authentication workflows were vulnerable to session fixation — an attacker could potentially inject or reuse a pre-existing token across authentication boundaries without it being replaced by a freshly issued one.
+
+**Fix:** All authentication and privilege-changing operations (login, password reset, password update) now unconditionally issue a **new JWT token** bound to the current password hash. Old tokens cannot be carried across authentication events.
+
+**Affected Files:**
+- `app/controllers/auth_controller.py` — `login()`, `reset_password()`, `update_my_password()`
+
+---
+
+#### 7. Account Lockout via Email Hijacking Prevention
+
+**Root Cause:** The email update endpoint allowed immediate email address changes without verifying ownership of the new email. An attacker with a valid session could change the victim's email to their own, locking the legitimate user out of all account recovery mechanisms (password reset emails would be sent to the attacker's email).
+
+**Fix:** The email update workflow was redesigned to require ownership verification before applying email address changes. Email modifications are no longer applied immediately, preventing account identity hijacking.
+
+**Affected Files:**
+- `app/controllers/user_controller.py` — Email update logic
+- `app/controllers/admin_controller.py` — Admin email update logic
+
+---
 
 > ⚠️ **Production Checklist**:
-> - Set a strong, unique `SECRET_KEY`
-> - Enable HTTPS via Nginx reverse proxy
-> - Use Gunicorn as WSGI server
-> - Persist token blacklist in Redis
-> - Ensure `FLASK_ENV=production` is set in `.env`
+> - ✅ Use a cryptographically secure `JWT_SECRET` (64+ hex characters)
+> - ✅ Ensure `FLASK_ENV=production` is set in `.env`
+> - ☐ Enable HTTPS via Nginx reverse proxy
+> - ☐ Deploy with Gunicorn as WSGI server (not Flask dev server)
+> - ☐ Persist token blacklist in Redis or database
+> - ☐ Implement CAPTCHA on registration for distributed enumeration defense
 
 ---
 
