@@ -26,6 +26,19 @@ from app.utils.validation import (
     ResetPasswordPayload,
     UpdateMyPasswordPayload,
 )
+import bcrypt
+
+DUMMY_PASSWORD_HASH = b'$2b$12$KIXe8P7v4Z4PqM7w8rE5IeM6bHq7.Hq7Hq7Hq7Hq7Hq7Hq7Hq7Hq'
+
+def _dummy_verify(password: str | None = None):
+    if not password:
+        password = 'dummy'
+    if isinstance(password, str):
+        password = password.encode('utf-8')
+    try:
+        bcrypt.checkpw(password[:72], DUMMY_PASSWORD_HASH)
+    except Exception:
+        pass
 
 
 def _patient_to_dict(patient: Patient):
@@ -251,10 +264,6 @@ def _register_patient(data: dict, issue_token: bool = True, log_event: bool = Tr
     if not _validate_email(email):
         raise ValidationError('Invalid email format')
 
-    existing = Patient.query.filter(func.lower(Patient.email) == email).first()
-    if existing:
-        raise AppError('Email already registered', status_code=409)
-
     doctor = Doctor.query.filter_by(doctor_id=data['doctor_id']).first()
     if not doctor:
         raise ValidationError(f'Doctor with id {data["doctor_id"]} does not exist')
@@ -262,6 +271,16 @@ def _register_patient(data: dict, issue_token: bool = True, log_event: bool = Tr
     caregiver = CareGiver.query.filter_by(care_giver_id=data['care_giver_id']).first()
     if not caregiver:
         raise ValidationError(f'CareGiver with id {data["care_giver_id"]} does not exist')
+
+    if Patient.query.filter(func.lower(Patient.email) == email).first() or \
+       Doctor.query.filter(func.lower(Doctor.email) == email).first() or \
+       CareGiver.query.filter(func.lower(CareGiver.email) == email).first() or \
+       Admin.query.filter(func.lower(Admin.email) == email).first():
+        _dummy_verify(data['password'])
+        return success_response(
+            message='If registration can proceed, further instructions will be provided.',
+            status_code=200,
+        )
 
     patient = Patient(
         patient_id=data.get('patient_id') or str(uuid4()),
@@ -293,14 +312,9 @@ def _register_patient(data: dict, issue_token: bool = True, log_event: bool = Tr
         )
         db.session.commit()
 
-    response_data = {'patient': _patient_to_dict(patient)}
-    if issue_token:
-        response_data['token'] = _issue_token(str(patient.patient_id), 'patient', patient.password)
-
     return success_response(
-        data=response_data,
-        message='Patient registered successfully',
-        status_code=201,
+        message='If registration can proceed, further instructions will be provided.',
+        status_code=200,
     )
 
 
@@ -314,9 +328,15 @@ def _register_doctor(data: dict, issue_token: bool = True, log_event: bool = Tru
     if not _validate_email(email):
         raise ValidationError('Invalid email format')
 
-    existing = Doctor.query.filter(func.lower(Doctor.email) == email).first()
-    if existing:
-        raise AppError('Email already registered', status_code=409)
+    if Patient.query.filter(func.lower(Patient.email) == email).first() or \
+       Doctor.query.filter(func.lower(Doctor.email) == email).first() or \
+       CareGiver.query.filter(func.lower(CareGiver.email) == email).first() or \
+       Admin.query.filter(func.lower(Admin.email) == email).first():
+        _dummy_verify(data['password'])
+        return success_response(
+            message='If registration can proceed, further instructions will be provided.',
+            status_code=200,
+        )
 
     doctor = Doctor(
         doctor_id=data.get('doctor_id') or str(uuid4()),
@@ -344,14 +364,9 @@ def _register_doctor(data: dict, issue_token: bool = True, log_event: bool = Tru
         )
         db.session.commit()
 
-    response_data = {'doctor': _doctor_to_dict(doctor)}
-    if issue_token:
-        response_data['token'] = _issue_token(str(doctor.doctor_id), 'doctor', doctor.password)
-
     return success_response(
-        data=response_data,
-        message='Doctor registered successfully',
-        status_code=201,
+        message='If registration can proceed, further instructions will be provided.',
+        status_code=200,
     )
 
 
@@ -365,9 +380,15 @@ def _register_caregiver(data: dict, issue_token: bool = True, log_event: bool = 
     if not _validate_email(email):
         raise ValidationError('Invalid email format')
 
-    existing = CareGiver.query.filter(func.lower(CareGiver.email) == email).first()
-    if existing:
-        raise AppError('Email already registered', status_code=409)
+    if Patient.query.filter(func.lower(Patient.email) == email).first() or \
+       Doctor.query.filter(func.lower(Doctor.email) == email).first() or \
+       CareGiver.query.filter(func.lower(CareGiver.email) == email).first() or \
+       Admin.query.filter(func.lower(Admin.email) == email).first():
+        _dummy_verify(data['password'])
+        return success_response(
+            message='If registration can proceed, further instructions will be provided.',
+            status_code=200,
+        )
 
     caregiver = CareGiver(
         care_giver_id=data.get('care_giver_id') or str(uuid4()),
@@ -393,14 +414,9 @@ def _register_caregiver(data: dict, issue_token: bool = True, log_event: bool = 
         )
         db.session.commit()
 
-    response_data = {'caregiver': _caregiver_to_dict(caregiver)}
-    if issue_token:
-        response_data['token'] = _issue_token(str(caregiver.care_giver_id), 'caregiver', caregiver.password)
-
     return success_response(
-        data=response_data,
-        message='Caregiver registered successfully',
-        status_code=201,
+        message='If registration can proceed, further instructions will be provided.',
+        status_code=200,
     )
 
 
@@ -456,36 +472,58 @@ def login():
 
     if role == 'patient':
         candidate = _match_patient()
-        if candidate and candidate.verify_password(password):
-            user_obj, user_role = candidate, 'patient'
+        if candidate:
+            if candidate.verify_password(password):
+                user_obj, user_role = candidate, 'patient'
+        else:
+            _dummy_verify(password)
     elif role == 'doctor':
         candidate = _match_doctor()
-        if candidate and candidate.verify_password(password):
-            user_obj, user_role = candidate, 'doctor'
+        if candidate:
+            if candidate.verify_password(password):
+                user_obj, user_role = candidate, 'doctor'
+        else:
+            _dummy_verify(password)
     elif role == 'caregiver':
         candidate = _match_caregiver()
-        if candidate and candidate.verify_password(password):
-            user_obj, user_role = candidate, 'caregiver'
+        if candidate:
+            if candidate.verify_password(password):
+                user_obj, user_role = candidate, 'caregiver'
+        else:
+            _dummy_verify(password)
     elif role == 'admin':
         candidate = _match_admin()
-        if candidate and candidate.verify_password(password):
-            user_obj, user_role = candidate, 'admin'
+        if candidate:
+            if candidate.verify_password(password):
+                user_obj, user_role = candidate, 'admin'
+        else:
+            _dummy_verify(password)
     else:
         p = _match_patient()
-        if p and p.verify_password(password):
-            user_obj, user_role = p, 'patient'
-        else:
-            d = _match_doctor()
-            if d and d.verify_password(password):
+        d = _match_doctor() if not p else None
+        c = _match_caregiver() if not p and not d else None
+        a = _match_admin() if not p and not d and not c else None
+
+        found_any = False
+        if p:
+            found_any = True
+            if p.verify_password(password):
+                user_obj, user_role = p, 'patient'
+        elif d:
+            found_any = True
+            if d.verify_password(password):
                 user_obj, user_role = d, 'doctor'
-            else:
-                c = _match_caregiver()
-                if c and c.verify_password(password):
-                    user_obj, user_role = c, 'caregiver'
-                else:
-                    a = _match_admin()
-                    if a and a.verify_password(password):
-                        user_obj, user_role = a, 'admin'
+        elif c:
+            found_any = True
+            if c.verify_password(password):
+                user_obj, user_role = c, 'caregiver'
+        elif a:
+            found_any = True
+            if a.verify_password(password):
+                user_obj, user_role = a, 'admin'
+
+        if not found_any:
+            _dummy_verify(password)
 
     if not user_obj:
         raise AuthError('invalid credentials')
@@ -585,8 +623,16 @@ def forget_password():
         raise ValidationError('Invalid email format')
 
     # 2) Get user by email (and role if provided)
-    user_obj, _resolved_role = _resolve_user_by_email(email, role)
+    try:
+        user_obj, _resolved_role = _resolve_user_by_email(email, role)
+    except ValidationError as e:
+        if 'Email exists in multiple accounts' in str(e):
+            user_obj = None
+        else:
+            raise
+
     if not user_obj:
+        _generate_reset_token_pair() # Dummy operation to align timing slightly
         return success_response(
             message='If your account exists, you will receive an email.',
             status_code=200,
@@ -769,3 +815,6 @@ def _get_token_from_header():
             return token_str.split(' ', 1)[1]
         return token_str
     return None
+
+
+

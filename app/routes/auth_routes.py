@@ -86,3 +86,7 @@ def open_reset_password_link_route():
 @limiter.limit('100 per minute')
 def update_my_password_route():
     return update_my_password()
+
+
+
+

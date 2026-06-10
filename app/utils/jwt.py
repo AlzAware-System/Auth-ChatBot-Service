@@ -24,8 +24,8 @@ def build_password_signature(password_hash: str | None):
 
 def _to_unix_timestamp(value):
     if isinstance(value, dt.datetime):
-        if value.tzinfo is not None:
-            value = value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=dt.timezone.utc)
         return int(value.timestamp())
     return None
 
@@ -52,9 +52,11 @@ def _load_current_user(payload: dict):
     raise JWTError('Invalid token role')
 
 def _get_secret() -> str:
-    secret = os.getenv('JWT_SECRET') or os.getenv('SECRET_KEY')
+    secret = os.getenv('JWT_SECRET')
+    if not secret or secret == 'JwtSecretForAuth':
+        secret = os.getenv('SECRET_KEY')
     if not secret:
-        raise JWTError('JWT secret not configured (set JWT_SECRET or SECRET_KEY).')
+        raise JWTError('JWT secret not configured.')
     return secret
 
 def _get_exp_minutes(overridden: int | None = None) -> int:
@@ -84,11 +86,46 @@ def decode_token(token: str):
     try:
         if token in _blacklist:
             raise JWTError('Token revoked')
-        return jwt.decode(token, _get_secret(), algorithms=['HS256'])
+            
+        try:
+            payload = jwt.decode(token, _get_secret(), algorithms=['HS256'])
+        except jwt.InvalidSignatureError:
+            fallback = os.getenv('JWT_SECRET_OLD')
+            if fallback:
+                payload = jwt.decode(token, fallback, algorithms=['HS256'])
+            else:
+                raise
+        
+        # Centralized security checks
+        current_user = _load_current_user(payload)
+        if not current_user:
+            raise JWTError('User no longer exists')
+            
+        token_iat = payload.get('iat')
+        password_changed_at = (
+            getattr(current_user, 'password_changed_at', None)
+            or getattr(current_user, 'passwordChangedAt', None)
+        )
+        changed_ts = _to_unix_timestamp(password_changed_at)
+
+        if changed_ts and token_iat and changed_ts > int(token_iat):
+            raise JWTError('Token invalidated due to profile or security changes')
+
+        token_password_sig = payload.get('pwd_sig')
+        current_password_sig = build_password_signature(getattr(current_user, 'password', None))
+        if not token_password_sig:
+            raise JWTError('Token missing security claim; please log in again')
+        if token_password_sig and current_password_sig:
+            if not hmac.compare_digest(token_password_sig, current_password_sig):
+                raise JWTError('Token invalidated due to profile or security changes')
+                
+        return payload
     except jwt.ExpiredSignatureError as e:
         raise JWTError('Token expired') from e
     except jwt.InvalidSignatureError as e:
         raise JWTError('Invalid signature') from e
+    except JWTError:
+        raise
     except Exception as e:
         raise JWTError(f'Token validation failed: {e}')
 
@@ -117,26 +154,6 @@ def jwt_required(roles: list[str] | None = None):
             try:
                 payload = decode_token(token)
                 current_user = _load_current_user(payload)
-                if not current_user:
-                    raise JWTError('User no longer exists')
-
-                token_iat = payload.get('iat')
-                password_changed_at = (
-                    getattr(current_user, 'password_changed_at', None)
-                    or getattr(current_user, 'passwordChangedAt', None)
-                )
-                changed_ts = _to_unix_timestamp(password_changed_at)
-
-                if changed_ts and token_iat and changed_ts > int(token_iat):
-                    raise JWTError('Password changed after token was issued')
-
-                token_password_sig = payload.get('pwd_sig')
-                current_password_sig = build_password_signature(getattr(current_user, 'password', None))
-                if not token_password_sig:
-                    raise JWTError('Token missing security claim; please log in again')
-                if token_password_sig and current_password_sig:
-                    if not hmac.compare_digest(token_password_sig, current_password_sig):
-                        raise JWTError('Password changed after token was issued')
 
                 current_role = str(payload.get('role') or '').strip().lower()
                 if normalized_roles and current_role not in normalized_roles:

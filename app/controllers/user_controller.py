@@ -1,4 +1,4 @@
-from flask import request
+from flask import request, redirect
 from sqlalchemy import func
 from datetime import datetime
 from uuid import uuid4
@@ -12,9 +12,10 @@ from app.models.medicine import Medicine
 from app.models.prescription import MPrescription
 from app.models.game_score import GameScore
 from app.models.todo import ToDo
-from app.utils.jwt import decode_token, JWTError, revoke_token
+from app.utils.jwt import decode_token, JWTError, revoke_token, create_access_token
 from app.utils.error_handler import handle_errors, AppError, AuthError, ValidationError, NotFoundError
 from app.utils.response import success_response
+from app.utils.email import send_email_change_verification, send_security_alert_email
 
 # --- التعديل: استيراد الموديلات والدوال الجديدة ---
 from app.utils.validation import (
@@ -242,6 +243,7 @@ def updateme():
     try: payload = decode_token(token)
     except JWTError as e: raise AuthError(str(e)) from e
     role, sub = payload.get('role'), payload.get('sub')
+    
     if role == 'patient':
         allowed = ['name', 'email', 'age', 'gender', 'phone', 'chronic_disease', 'city', 'address', 'hospital_address']
         user = Patient.query.filter_by(patient_id=sub).first()
@@ -251,10 +253,34 @@ def updateme():
     else:
         allowed = ['name', 'email', 'phone', 'city', 'address', 'relation']
         user = CareGiver.query.filter_by(care_giver_id=sub).first()
+        
     if not user: raise NotFoundError('User not found')
+
+    # Email Global Uniqueness Check
+    new_email_raw = data.get('email')
+    if new_email_raw:
+        new_email = str(new_email_raw).strip().lower()
+        if new_email and new_email != user.email:
+            # Check uniqueness across all tables
+            if Patient.query.filter(func.lower(Patient.email) == new_email).first() or \
+               Doctor.query.filter(func.lower(Doctor.email) == new_email).first() or \
+               CareGiver.query.filter(func.lower(CareGiver.email) == new_email).first() or \
+               Admin.query.filter(func.lower(Admin.email) == new_email).first():
+                raise AppError('Email already registered', status_code=409)
+            
+            # Send alert to old email
+            send_security_alert_email(
+                to_email=user.email,
+                message=f'Your account email has been successfully changed to {new_email}.'
+            )
+            
+            # Invalidate all previously issued tokens by updating password_changed_at
+            user.password_changed_at = datetime.utcnow()
+
     for k, v in data.items():
         if k in allowed and v is not None: setattr(user, k, v)
     db.session.commit()
+    
     return success_response(data=_public_user_payload(user, role))
 
 @handle_errors('Delete profile failed')
@@ -384,9 +410,20 @@ def add_game_score():
 
 @handle_errors('Fetch patient game scores failed')
 def get_patient_game_scores(patient_id: str):
-    patient = Patient.query.filter_by(patient_id=patient_id).first()
-    if not patient or not patient.active:
-        raise NotFoundError('Patient not found/active')
+    role, subject = _resolve_token_identity()
+
+    if role == 'patient':
+        if subject != patient_id:
+            raise AuthError('Patient can only view own game scores')
+        patient = Patient.query.filter_by(patient_id=patient_id).first()
+        if not patient or not patient.active:
+            raise NotFoundError('Patient not found/active')
+    elif role == 'doctor':
+        patient = _doctor_patient_guard(subject, patient_id)
+    elif role == 'caregiver':
+        patient = _caregiver_patient_guard(subject, patient_id)
+    else:
+        raise AuthError('Access denied')
 
     scores = (
         GameScore.query

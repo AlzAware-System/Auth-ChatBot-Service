@@ -277,11 +277,15 @@ def ask_text():
     2. **Medicines:** If asked about meds or time, check "MEDICATION SCHEDULE". Compare with "Current Time".
     3. **Games:** If asked about performance, check "GAME SCORES".
     4. **Language:** Reply concisely and warmly in the SAME language as the user (Arabic/English).
-
-    User Question: "{question}"
     """
 
-    response = model.generate_content(system_prompt, safety_settings=safety_settings)
+    messages = [
+        {"role": "user", "parts": [system_prompt]},
+        {"role": "model", "parts": ["Understood. I will strictly follow these instructions and only use the provided context."]},
+        {"role": "user", "parts": [question]}
+    ]
+
+    response = model.generate_content(messages, safety_settings=safety_settings)
     try:
         reply_text = response.text
     except ValueError:
@@ -335,7 +339,6 @@ def ask_voice():
         system_prompt = f"""
         You are a smart voice assistant for an Alzheimer's patient.
         Context: {final_context}
-        User said: "{user_text}"
 
         Instructions:
         - If asked about Doctor or Caregiver, look at the "MEDICAL TEAM (CONTACTS)" in DB Data.
@@ -344,7 +347,13 @@ def ask_voice():
         - Reply warmly and concisely in Arabic (Egyptian dialect preferred). Make sure the text is written in clean Arabic letters so the TTS model reads it naturally.
         """
 
-        response = model.generate_content(system_prompt, safety_settings=safety_settings)
+        messages = [
+            {"role": "user", "parts": [system_prompt]},
+            {"role": "model", "parts": ["Understood. I will strictly follow these instructions and only use the provided context."]},
+            {"role": "user", "parts": [user_text]}
+        ]
+
+        response = model.generate_content(messages, safety_settings=safety_settings)
         try:
             ai_text = response.text
         except ValueError:

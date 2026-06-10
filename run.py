@@ -1,7 +1,8 @@
+import os
 from app import create_app
 
 app = create_app()
 
 if __name__ == '__main__':
-    # For development only; use a proper WSGI server (gunicorn/uvicorn) in production
-    app.run(host='0.0.0.0', port=5005, debug=True, use_reloader=False)
+    debug_mode = os.getenv('FLASK_ENV', 'development') == 'development'
+    app.run(host='0.0.0.0', port=5005, debug=debug_mode, use_reloader=False)

@@ -151,12 +151,25 @@ def update_user_email(role: str, user_id: str):
         raise ValidationError('Invalid email format')
 
     user_obj = _fetch_user(role, user_id)
-    model = _model_for_role(role)
-    duplicate = model.query.filter(func.lower(model.email) == new_email).first()
-    if duplicate:
-        same_id = getattr(duplicate, 'patient_id', None) == user_id or getattr(duplicate, 'doctor_id', None) == user_id or getattr(duplicate, 'care_giver_id', None) == user_id
-        if not same_id:
-            raise ValidationError('Email already exists')
+    user_obj = _fetch_user(role, user_id)
+    
+    # Check for duplicates across ALL tables
+    if (Patient.query.filter(func.lower(Patient.email) == new_email).first() and role != 'patient') or \
+       (Doctor.query.filter(func.lower(Doctor.email) == new_email).first() and role != 'doctor') or \
+       (CareGiver.query.filter(func.lower(CareGiver.email) == new_email).first() and role != 'caregiver') or \
+       (Admin.query.filter(func.lower(Admin.email) == new_email).first()):
+        
+        # If it exists in the SAME table, ensure it's the exact same user
+        model = _model_for_role(role)
+        duplicate = model.query.filter(func.lower(model.email) == new_email).first()
+        if duplicate:
+            same_id = getattr(duplicate, 'patient_id', None) == user_id or \
+                      getattr(duplicate, 'doctor_id', None) == user_id or \
+                      getattr(duplicate, 'care_giver_id', None) == user_id
+            if not same_id:
+                raise ValidationError('Email already exists')
+        else:
+            raise ValidationError('Email already exists in another role')
 
     old_email = user_obj.email
     user_obj.email = new_email

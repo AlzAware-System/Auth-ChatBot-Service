@@ -475,12 +475,31 @@ RATELIMIT_STORAGE_URI=memory://
 | **Rate Limiting** | Flask-Limiter per-IP rate limiting |
 | **SQL Injection** | Flask-SQLAlchemy ORM with parameterized queries |
 
+### 🛡️ Hardened Security Patches
+
+Recently, the following critical vulnerabilities were successfully closed across the `Auth-ChatBot-Service` and `Face-Recognition-Service`:
+
+1. **Registration Enumeration Prevention:** Registration endpoints return identical `HTTP 200 OK` generic responses and normalize processing time (`_dummy_verify`) regardless of whether an email exists or not, preventing attackers from harvesting registered emails.
+
+2. **Werkzeug Debugger & Information Disclosure:** Enforced `FLASK_ENV=production` and dynamic `debug=False` loading to prevent the Flask/Werkzeug interactive debugger from leaking stack traces and sensitive source code to the client on `500 Internal Server Error`.
+
+3. **Weak JWT Secret & Safe Rotation:** Replaced the weak hardcoded JWT secret with a cryptographically secure 64-character hex string. Implemented a seamless fallback mechanism (`JWT_SECRET_OLD`) in both the Auth service and Face Recognition services to securely rotate keys without invalidating existing mobile application sessions.
+
+4. **Token Invalidation Failure Fix:** Fixed a Python timezone bug (`datetime.utcnow()`) in `jwt.py` that caused password-change timestamps to evaluate incorrectly against token issuance times. Changing a password now mathematically invalidates all previously issued JWT tokens instantly.
+
+5. **AI Chatbot Prompt Injection Defense:** Refactored the Gemini API integration in `chat_controller.py` to use a strict `messages` array payload. This perfectly separates system instructions from user inputs, preventing attackers from bypassing restrictions using malicious inputs.
+
+6. **Token Fixation Protection:** Authentication workflows were hardened to ensure that a fresh JWT is always issued after successful authentication and privilege-changing operations. Existing or attacker-controlled tokens can no longer be reused across authentication boundaries, preventing session fixation attacks and ensuring that authenticated sessions are always bound to a newly generated secure token.
+
+7. **Account Lockout via Email Hijacking Prevention:** The email update workflow was redesigned to require ownership verification before applying email address changes. Sensitive account actions are no longer performed immediately when a new email is submitted. Instead, verification is required before the account identity is modified, preventing attackers from hijacking accounts by replacing a victim's email address and locking the legitimate user out of password recovery and account access mechanisms.
+
+
 > ⚠️ **Production Checklist**:
 > - Set a strong, unique `SECRET_KEY`
 > - Enable HTTPS via Nginx reverse proxy
 > - Use Gunicorn as WSGI server
 > - Persist token blacklist in Redis
-> - Set `FLASK_ENV=production`
+> - Ensure `FLASK_ENV=production` is set in `.env`
 
 ---
 

@@ -4,6 +4,8 @@ from flask import jsonify, request
 
 from app import db
 from app.models.location import Location
+from app.models.patient import Patient
+from app.utils.jwt import jwt_required
 
 
 def _parse_timestamp(value: str) -> datetime:
@@ -22,6 +24,34 @@ def _parse_timestamp(value: str) -> datetime:
     return parsed
 
 
+def _check_location_access(device_id: str):
+    payload = getattr(request, 'current_user_payload', None)
+    if not payload:
+        return False, 'Unauthorized'
+    
+    role = payload.get('role')
+    sub = payload.get('sub')
+    
+    if role == 'patient':
+        if sub != device_id:
+            return False, 'Patient can only access own location'
+    elif role == 'caregiver':
+        patient = Patient.query.filter_by(patient_id=device_id).first()
+        if not patient or patient.care_giver_id != sub:
+            return False, 'Caregiver unauthorized for this patient'
+    elif role == 'doctor':
+        patient = Patient.query.filter_by(patient_id=device_id).first()
+        if not patient or patient.doctor_id != sub:
+            return False, 'Doctor unauthorized for this patient'
+    elif role == 'admin':
+        pass # Admin can see any
+    else:
+        return False, 'Access denied'
+        
+    return True, ''
+
+
+@jwt_required()
 def receive_gps():
     try:
         data = request.get_json(force=True)
@@ -36,6 +66,10 @@ def receive_gps():
         device_id = str(data['properties']['device']).strip()
         if not device_id:
             raise ValueError('Device id is required')
+            
+        allowed, msg = _check_location_access(device_id)
+        if not allowed:
+            return jsonify({'status': 'error', 'message': msg}), 403
 
         timestamp_raw = data['properties']['timestamp']
         parsed_timestamp = _parse_timestamp(timestamp_raw)
@@ -59,11 +93,16 @@ def receive_gps():
         return jsonify({'status': 'error', 'message': str(exc)}), 400
 
 
+@jwt_required()
 def get_last_location():
     try:
         device_id = (request.args.get('device_id') or '').strip()
         if not device_id:
             return jsonify({'error': 'device_id is required'}), 400
+
+        allowed, msg = _check_location_access(device_id)
+        if not allowed:
+            return jsonify({'error': msg}), 403
 
         location = (
             Location.query
@@ -86,11 +125,16 @@ def get_last_location():
         return jsonify({'error': 'internal server error', 'message': str(exc)}), 500
 
 
+@jwt_required()
 def get_history():
     try:
         device_id = (request.args.get('device_id') or '').strip()
         if not device_id:
             return jsonify({'error': 'device_id is required'}), 400
+
+        allowed, msg = _check_location_access(device_id)
+        if not allowed:
+            return jsonify({'error': msg}), 403
 
         from_value = (request.args.get('from') or '').strip()
         to_value = (request.args.get('to') or '').strip()
