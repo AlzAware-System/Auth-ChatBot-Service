@@ -433,7 +433,7 @@ JWT_EXP_MINUTES=120
 ### Security Features
 
 - **Password-change invalidation**: Tokens become invalid when the user changes their password
-- **Token blacklist**: Logout adds tokens to an in-memory blacklist
+- **Token blacklist**: Logout adds tokens to a Redis-based JWT Blacklist
 - **Role-based access**: Token payload includes user role for authorization
 - **Password signature**: Token includes a `pwd_sig` claim to detect password changes
 
@@ -476,7 +476,7 @@ RATELIMIT_STORAGE_URI=memory://
 | **Input Validation** | Pydantic v2 strict schemas | All request payloads are validated; invalid data returns `422 Unprocessable Entity` |
 | **Rate Limiting** | Flask-Limiter (per-IP) | All endpoints are rate-limited to prevent abuse (default: 100 req/min) |
 | **SQL Injection** | SQLAlchemy ORM | Parameterized queries via ORM — no raw SQL concatenation |
-| **Token Revocation** | In-memory blacklist | Logout immediately invalidates the token for the remainder of its TTL |
+| **Token Revocation** | Redis-based JWT Blacklist | Logout immediately invalidates the token for the remainder of its TTL |
 | **Cross-Service Auth** | Shared `JWT_SECRET` | Tokens issued here are verifiable by `Face-Recognition-Service` |
 
 ---

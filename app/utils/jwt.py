@@ -102,11 +102,7 @@ def decode_token(token: str):
         try:
             payload = jwt.decode(token, _get_secret(), algorithms=['HS256'])
         except jwt.InvalidSignatureError:
-            fallback = os.getenv('JWT_SECRET_OLD')
-            if fallback:
-                payload = jwt.decode(token, fallback, algorithms=['HS256'])
-            else:
-                raise
+            raise
         
         # Centralized security checks
         current_user = _load_current_user(payload)
