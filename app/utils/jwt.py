@@ -6,6 +6,7 @@ import jwt
 from flask import request
 from functools import wraps
 from app.utils.response import error_response
+from app.utils.redis_client import get_redis_client
 
 DEFAULT_EXP_MINUTES = 60
 _blacklist: set[str] = set()
@@ -87,6 +88,17 @@ def decode_token(token: str):
         if token in _blacklist:
             raise JWTError('Token revoked')
             
+        # Check Redis blacklist
+        try:
+            redis_client = get_redis_client()
+            if redis_client:
+                if redis_client.exists(f"blacklist:{token}"):
+                    raise JWTError('Token revoked')
+        except JWTError:
+            raise
+        except Exception:
+            pass # Fail open if Redis is down, rely on memory blacklist
+            
         try:
             payload = jwt.decode(token, _get_secret(), algorithms=['HS256'])
         except jwt.InvalidSignatureError:
@@ -130,8 +142,24 @@ def decode_token(token: str):
         raise JWTError(f'Token validation failed: {e}')
 
 def revoke_token(token: str) -> None:
+    # 1. Add to local memory blacklist as fallback
     _blacklist.add(token)
-
+    
+    # 2. Add to Redis blacklist with TTL
+    try:
+        # We decode without verification just to extract the 'exp' claim
+        payload = jwt.decode(token, options={"verify_signature": False})
+        exp = payload.get('exp')
+        
+        redis_client = get_redis_client()
+        if redis_client and exp:
+            now = int(dt.datetime.now(dt.timezone.utc).timestamp())
+            ttl = exp - now
+            if ttl > 0:
+                redis_client.setex(f"blacklist:{token}", ttl, "revoked")
+    except Exception:
+        pass # Ignore errors, local memory blacklist will act as fallback
+    
 def _get_token_from_header():
     auth_header = request.headers.get('Authorization')
     if auth_header and auth_header.startswith('Bearer '):

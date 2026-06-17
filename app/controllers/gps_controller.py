@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 from flask import jsonify, request
+import json
 
 from app import db
 from app.models.location import Location
+from app.utils.redis_client import get_redis_client
 from app.models.patient import Patient
 from app.utils.jwt import jwt_required
 
@@ -86,6 +88,23 @@ def receive_gps():
         Location.query.filter(Location.timestamp < cutoff).delete(synchronize_session=False)
 
         db.session.commit()
+
+        # Cache in Redis
+        try:
+            redis_client = get_redis_client()
+            if redis_client:
+                redis_key = f"gps:{device_id}"
+                redis_data = {
+                    'device': device_id,
+                    'lat': latitude,
+                    'lon': longitude,
+                    'timestamp': location.timestamp.isoformat() if location.timestamp else None,
+                }
+                # Cache for 24 hours to prevent memory bloat
+                redis_client.setex(redis_key, 86400, json.dumps(redis_data))
+        except Exception:
+            pass # Fail gracefully if Redis is unavailable
+
         return jsonify({'status': 'ok'}), 200
 
     except Exception as exc:
@@ -104,6 +123,18 @@ def get_last_location():
         if not allowed:
             return jsonify({'error': msg}), 403
 
+        # 1. Try to get from Redis first
+        try:
+            redis_client = get_redis_client()
+            if redis_client:
+                redis_key = f"gps:{device_id}"
+                cached_data = redis_client.get(redis_key)
+                if cached_data:
+                    return jsonify(json.loads(cached_data)), 200
+        except Exception:
+            pass # Fail gracefully, fallback to DB
+
+        # 2. Fallback to Database
         location = (
             Location.query
             .filter(Location.device_id == device_id)
@@ -114,12 +145,23 @@ def get_last_location():
         if not location:
             return jsonify({'error': 'not found'}), 404
 
-        return jsonify({
+        response_data = {
             'device': device_id,
             'lat': location.lat,
             'lon': location.lon,
             'timestamp': location.timestamp.isoformat() if location.timestamp else None,
-        }), 200
+        }
+
+        # Cache the retrieved data for future requests
+        try:
+            redis_client = get_redis_client()
+            if redis_client:
+                redis_key = f"gps:{device_id}"
+                redis_client.setex(redis_key, 86400, json.dumps(response_data))
+        except Exception:
+            pass
+
+        return jsonify(response_data), 200
 
     except Exception as exc:
         return jsonify({'error': 'internal server error', 'message': str(exc)}), 500

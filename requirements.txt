@@ -34,3 +34,4 @@ pydub
 
 # AWS
 boto3>=1.34,<2.0
+redis==5.0.4
