@@ -157,6 +157,11 @@ def create_app():
     """Application factory for Flask app."""
     load_dotenv()  # Load environment variables from .env if present
     app = Flask(__name__)
+    
+    # 🎯 Initialize Tracing Middleware
+    from app.utils.tracing import setup_tracing
+    setup_tracing(app, "Auth-ChatBot-Service")
+
     default_rate_limits = _load_default_rate_limits()
     default_rate_limits_config = '; '.join(default_rate_limits)
 
