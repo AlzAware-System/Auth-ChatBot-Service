@@ -593,6 +593,24 @@ A comprehensive security audit was conducted on the entire backend platform. The
 
 ---
 
+## 📝 Data Validation & Transformation
+
+This project employs rigorous data validation and transformation pipelines to ensure data integrity, prevent injection attacks, and prepare data for AI models.
+
+### Validation (`Pydantic`)
+- **Strict Payloads:** All incoming requests are validated against robust `Pydantic v2` schemas (e.g., `RegisterPatientPayload`, `LoginPayload`).
+- **Data Integrity:** We use `ConfigDict(extra='forbid')` to reject any undocumented fields in API requests, mitigating mass-assignment vulnerabilities.
+- **Custom Business Logic:** Complex validation rules (e.g., matching `password` and `confirm_password`, verifying contact info) are enforced using Pydantic's `@model_validator(mode='after')`.
+
+### Serialization & Transformation
+- **Object-to-JSON Serialization:** Dedicated mapping functions (e.g., `_patient_to_dict`, `_caregiver_to_dict`) cleanly transform complex `SQLAlchemy` ORM entities into secure, formatted JSON dictionaries for API responses.
+- **JSON-to-Object Deserialization:** Incoming raw JSON payloads are transformed and sanitized into safe Python data types using Pydantic's `.model_validate().model_dump()`.
+- **AI/ML Data Pipelines:**
+  - **NLP:** Text queries are transformed into dense vector embeddings using `SentenceTransformer` for RAG and vector database querying (ChromaDB).
+  - **Computer Vision (Face Recognition):** `LabelEncoder` is utilized to transform raw string labels (names) into numeric formats for neural network training (`fit_transform`) and inverse-transformed back to names during inference (`inverse_transform`).
+
+---
+
 ## 📁 Project Structure
 
 ```
